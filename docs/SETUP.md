@@ -16,7 +16,10 @@ docker compose up -d
 
 ```
 cp .env.example .env
+cp .env.example prisma/.env
 ```
+
+> Note: The Prisma CLI requires the `.env` file in the `prisma/` directory when using the `--schema` flag.
 
 3) Install dependencies (at repo root)
 
