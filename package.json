@@ -11,11 +11,15 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint || true",
     "test": "pnpm -r test || true",
-    "format": "pnpm -r format || true"
+    "format": "pnpm -r format || true",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
     "typescript": "^5.6.3",
-    "@types/node": "^20.11.30"
+    "@types/node": "^20.11.30",
+    "prisma": "^5.20.0"
   }
 }
