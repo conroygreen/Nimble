@@ -1,0 +1,252 @@
+// Prisma Schema for Multi-Tenant SaaS Platform
+// PostgreSQL with Row-Level Security (RLS) support
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// Multi-Tenant Base Model
+model Tenant {
+  id      String  @id @default(cuid())
+  name    String
+  slug    String  @unique
+  domain  String? @unique
+  logoUrl String?
+
+  // Tenant settings
+  settings Json?
+
+  // Multi-tenancy isolation
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users       User[]
+  memberships Membership[]
+  products    Product[]
+  orders      Order[]
+  payments    Payment[]
+
+  @@index([slug])
+  @@index([domain])
+  @@map("tenants")
+}
+
+// User Model
+model User {
+  id        String  @id @default(cuid())
+  email     String  @unique
+  firstName String?
+  lastName  String?
+  avatarUrl String?
+
+  // Auth provider ID (Clerk/Auth0)
+  authProviderId String @unique
+
+  // Multi-tenancy
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  memberships Membership[]
+  orders      Order[]
+
+  @@index([tenantId])
+  @@index([email])
+  @@index([authProviderId])
+  @@map("users")
+}
+
+// Membership (User-Tenant relationship with roles)
+model Membership {
+  id     String           @id @default(cuid())
+  role   UserRole         @default(MEMBER)
+  status MembershipStatus @default(ACTIVE)
+
+  // Multi-tenancy
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+// Product Model
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Decimal @db.Decimal(10, 2)
+  currency    String  @default("usd")
+
+  // Product details
+  imageUrls String[]
+  sku       String?  @unique
+  stock     Int?
+  active    Boolean  @default(true)
+
+  // Custom print options
+  options Json?
+
+  // Multi-tenancy
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orderItems OrderItem[]
+
+  @@index([tenantId])
+  @@index([sku])
+  @@index([active])
+  @@map("products")
+}
+
+// Order Model
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique
+  status      OrderStatus @default(DRAFT)
+
+  // Customer info
+  customerEmail String
+  customerName  String?
+
+  // Pricing
+  subtotal Decimal @db.Decimal(10, 2)
+  tax      Decimal @db.Decimal(10, 2)
+  total    Decimal @db.Decimal(10, 2)
+  currency String  @default("usd")
+
+  // Shipping
+  shippingAddress Json?
+  billingAddress  Json?
+
+  // Notes
+  notes String?
+
+  // Multi-tenancy
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  items    OrderItem[]
+  payments Payment[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+// Order Item Model
+model OrderItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+
+  // Custom options
+  options Json?
+
+  // Relations
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// Payment Model
+model Payment {
+  id       String        @id @default(cuid())
+  amount   Decimal       @db.Decimal(10, 2)
+  currency String        @default("usd")
+  status   PaymentStatus @default(PENDING)
+
+  // Stripe integration
+  stripePaymentIntentId String? @unique
+  stripeCustomerId      String?
+
+  // Payment details
+  paymentMethod String?
+  metadata      Json?
+
+  // Multi-tenancy
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([orderId])
+  @@index([status])
+  @@index([stripePaymentIntentId])
+  @@map("payments")
+}
