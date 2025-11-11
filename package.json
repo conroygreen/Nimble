@@ -1,0 +1,16 @@
+{
+  "name": "nimble",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run -w apps/api build && npm run -w apps/web build && npm run -w apps/worker build",
+    "dev": "echo 'Run apps individually: api -> npm run -w apps/api start:dev | web -> npm run -w apps/web dev | worker -> npm run -w apps/worker dev'",
+    "test": "npm -w apps/api test",
+    "lint": "echo 'Add linters per app/package'",
+    "seed": "npm -w apps/api run prisma:seed"
+  }
+}
