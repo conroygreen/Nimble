@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nimble/core/*": ["packages/core/src/*"],
+      "@nimble/utils/*": ["packages/utils/src/*"],
+      "@nimble/ui/*": ["packages/ui/src/*"]
+    }
+  }
+}
