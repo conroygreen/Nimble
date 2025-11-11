@@ -68,13 +68,21 @@ model Tenant {
   theme        Theme?
 
   // Relations
-  memberships  Membership[]
-  products     Product[]
-  customers    Customer[]
-  orders       Order[]
-  priceRules   PriceRule[]
-  integrations Integration[]
-  webhooks     WebhookEndpoint[]
+  memberships         Membership[]
+  products            Product[]
+  customers           Customer[]
+  orders              Order[]
+  orderItems          OrderItem[]
+  priceRules          PriceRule[]
+  integrations        Integration[]
+  webhooks            WebhookEndpoint[]
+  artworks            Artwork[]
+  jobs                Job[]
+  shipments           Shipment[]
+  invoices            Invoice[]
+  payments            Payment[]
+  integrationMappings IntegrationMapping[]
+  integrationEvents   IntegrationEvent[]
 
   @@index([name])
 }

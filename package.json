@@ -14,8 +14,12 @@
     "format": "pnpm -r format || true"
   },
   "devDependencies": {
+    "@types/node": "^20.11.30",
     "concurrently": "^8.2.2",
-    "typescript": "^5.6.3",
-    "@types/node": "^20.11.30"
+    "prisma": "5.22.0",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0"
   }
 }
