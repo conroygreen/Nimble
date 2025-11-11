@@ -1,0 +1,226 @@
+// Prisma schema for Nimble Printing SaaS Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// TENANT & USER MANAGEMENT
+// ============================================================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  subdomain String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Theming
+  logo           String?
+  primaryColor   String  @default("#000000")
+  secondaryColor String  @default("#FFFFFF")
+  fontFamily     String  @default("Inter")
+  customCss      String?
+
+  // Subscription
+  subscriptionTier   String  @default("STARTER") // STARTER, PRO, ENTERPRISE
+  subscriptionStatus String  @default("ACTIVE") // ACTIVE, SUSPENDED, CANCELLED
+  stripeCustomerId   String? @unique
+  stripeSubscriptionId String? @unique
+
+  // Relations
+  users    User[]
+  products Product[]
+  orders   Order[]
+  
+  @@index([subdomain])
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  role      String   @default("CUSTOMER") // SUPER_ADMIN, TENANT_ADMIN, TENANT_USER, CUSTOMER
+  clerkId   String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orders Order[]
+  
+  @@index([tenantId])
+  @@index([clerkId])
+}
+
+// ============================================================================
+// PRODUCT CATALOG
+// ============================================================================
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  slug        String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Pricing
+  basePrice       Float
+  quantityBreaks  Json? // Array of {minQuantity, pricePerUnit}
+  optionMarkups   Json? // Object of {optionId: markup}
+
+  // Configuration
+  options         Json? // Array of ProductOption objects
+  
+  // Specifications
+  trimSize        String? // e.g., "8.5x11"
+  requiredDpi     Int     @default(300)
+  requiredBleed   Float   @default(0.125) // inches
+  requiredColorSpace String @default("CMYK")
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderItems OrderItem[]
+  
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([active])
+}
+
+// ============================================================================
+// ORDERS & JOBS
+// ============================================================================
+
+model Order {
+  id        String   @id @default(uuid())
+  orderNumber String @unique
+  status    String   @default("NEW") // NEW, PREFLIGHT, PRESS, FINISH, SHIPPED, CANCELLED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer info
+  customerEmail String
+  shippingAddress Json
+
+  // Payment
+  totalAmount      Float
+  paymentIntentId  String?
+  paymentStatus    String  @default("PENDING") // PENDING, PAID, FAILED
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   User?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  items OrderItem[]
+  jobs  Job[]
+  
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  quantity  Int
+  options   Json // Selected options for this item
+  fileUrls  Json // Array of S3 URLs
+  price     Float
+  createdAt DateTime @default(now())
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Job {
+  id        String   @id @default(uuid())
+  status    String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Preflight results
+  preflightStatus String? // PENDING, PROCESSING, PASSED, FAILED
+  preflightResult Json? // Detailed preflight check results
+
+  // Production
+  jobTicketUrl    String? // S3 URL to job ticket PDF
+  proofUrls       Json? // Array of proof image URLs
+  barcodeData     String?
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// ============================================================================
+// AUDIT & LOGGING
+// ============================================================================
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String
+  userId    String?
+  tenantId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// SUPPORT & BILLING
+// ============================================================================
+
+model SupportTicket {
+  id        String   @id @default(uuid())
+  subject   String
+  message   String
+  status    String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  priority  String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  tenantId  String?
+  userId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model Invoice {
+  id              String   @id @default(uuid())
+  invoiceNumber   String   @unique
+  tenantId        String
+  amount          Float
+  status          String   @default("PENDING") // PENDING, PAID, FAILED, CANCELLED
+  stripeInvoiceId String?  @unique
+  dueDate         DateTime
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([status])
+}
