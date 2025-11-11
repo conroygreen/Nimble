@@ -1,0 +1,385 @@
+// Prisma 5+
+// npx prisma migrate dev --name init
+// All tenant-scoped tables include tenantId for Postgres RLS policies.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  STAFF
+  B2B_CLIENT
+}
+
+enum CustomerKind {
+  B2C
+  B2B
+}
+
+enum OrderStatus {
+  NEW
+  PREFLIGHT
+  ON_PRESS
+  FINISHING
+  PACKED
+  SHIPPED
+  CANCELLED
+}
+
+enum JobState {
+  QUEUED
+  PREFLIGHT
+  PRESS
+  FINISH
+  PACK
+  SHIP
+  HOLD
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIAL
+}
+
+model Tenant {
+  id           String    @id @default(cuid())
+  name         String
+  slug         String    @unique                // subdomain
+  plan         String    @default("starter")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Billing
+  stripeCustomerId String? @unique
+  stripeSubId      String? @unique
+
+  // Branding
+  theme        Theme?
+
+  // Relations
+  memberships  Membership[]
+  products     Product[]
+  customers    Customer[]
+  orders       Order[]
+  priceRules   PriceRule[]
+  integrations Integration[]
+  webhooks     WebhookEndpoint[]
+  // Additional relations for tenant-scoped entities
+  orderItems   OrderItem[]
+  artworks     Artwork[]
+  jobs         Job[]
+  shipments    Shipment[]
+  invoices     Invoice[]
+  payments     Payment[]
+  integrationMappings IntegrationMapping[]
+  integrationEvents   IntegrationEvent[]
+
+  @@index([name])
+}
+
+model Theme {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  logoUrl   String?
+  // store a small design system as JSON
+  tokens    Json?
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String        @id @default(cuid())
+  email         String        @unique
+  name          String?
+  createdAt     DateTime      @default(now())
+  memberships   Membership[]
+  // optional: external auth linkage
+  authProvider  String?
+  authSubject   String?       @unique
+
+  @@index([email])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      UserRole @default(STAFF)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId, role])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  sku         String?  // for simple products
+  type        String   // e.g., "business_card", "flyer", "poster"
+  optionsSchema Json   // JSON schema for configurator (size, stock, finish, sides, qty, etc.)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  priceRules  PriceRule[]
+  orderItems  OrderItem[]
+
+  @@index([tenantId, type, active])
+}
+
+model PriceRule {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productId  String
+  ruleJson   Json     // define base price, option markups, qty breaks, rush multipliers
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, productId, active])
+}
+
+model Customer {
+  id          String        @id @default(cuid())
+  tenantId    String
+  kind        CustomerKind  @default(B2C)
+  companyName String?
+  contactName String?
+  email       String?
+  phone       String?
+  // for B2B terms, pricing overrides, etc.
+  meta        Json?
+
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@index([tenantId, kind])
+  @@index([tenantId, email])
+}
+
+model Order {
+  id            String       @id @default(cuid())
+  tenantId      String
+  customerId    String?
+  number        String       @unique
+  status        OrderStatus  @default(NEW)
+  currency      String       @default("USD")
+  subtotal      Decimal      @db.Decimal(18, 2) @default(0)
+  shippingTotal Decimal      @db.Decimal(18, 2) @default(0)
+  taxTotal      Decimal      @db.Decimal(18, 2) @default(0)
+  discountTotal Decimal      @db.Decimal(18, 2) @default(0)
+  grandTotal    Decimal      @db.Decimal(18, 2) @default(0)
+
+  placedAt      DateTime     @default(now())
+  notes         String?
+
+  // Shipping
+  shipName      String?
+  shipCompany   String?
+  shipPhone     String?
+  shipAddress1  String?
+  shipAddress2  String?
+  shipCity      String?
+  shipRegion    String?
+  shipPostal    String?
+  shipCountry   String?
+
+  // External linkage (future connectors)
+  externalId    String?      // e.g., gid://shopify/Order/...
+  externalSource String?     // "shopify" | "woo" | "etsy" | ...
+
+  tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer      Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items         OrderItem[]
+  jobs          Job[]
+  shipments     Shipment[]
+  invoice       Invoice?
+  payments      Payment[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, externalSource, externalId])
+  @@index([tenantId, placedAt])
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  tenantId     String
+  orderId      String
+  productId    String
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(18, 4)
+  totalPrice   Decimal  @db.Decimal(18, 2)
+  specsJson    Json     // resolved options (size, stock, finish, sides, etc.)
+  notes        String?
+
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  artworks     Artwork[]
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, orderId])
+}
+
+model Artwork {
+  id              String   @id @default(cuid())
+  tenantId        String
+  orderItemId     String
+  originalUrl     String?     // original source (if any)
+  s3Key           String      // stored object key
+  thumbS3Key      String?
+  preflightReport Json?       // results (DPI, bleed, trim, CMYK/RGB)
+  status          String?     // "RECEIVED" | "PREFLIGHT_OK" | "PREFLIGHT_FAIL"
+  createdAt       DateTime @default(now())
+
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, orderItemId])
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  state       JobState @default(QUEUED)
+  workstation String?  // press, cutter, binder, etc.
+  barcode     String?
+  timestamps  Json?    // scan history per stage
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, state])
+}
+
+model Shipment {
+  id             String   @id @default(cuid())
+  tenantId       String
+  orderId        String
+  carrier        String?
+  service        String?
+  trackingNumber String?
+  trackingUrl    String?
+  labelUrl       String?
+  shippedAt      DateTime?
+
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shippedAt])
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String   @unique
+  number      String   @unique
+  amount      Decimal  @db.Decimal(18, 2)
+  pdfUrl      String?
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id              String         @id @default(cuid())
+  tenantId        String
+  orderId         String
+  provider        String         // "stripe"
+  providerRef     String?        // intent id / charge id
+  status          PaymentStatus  @default(PENDING)
+  amount          Decimal        @db.Decimal(18, 2)
+  currency        String         @default("USD")
+  createdAt       DateTime       @default(now())
+
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
+
+model Integration {
+  id             String   @id @default(cuid())
+  tenantId       String
+  provider       String   // "shopify" | "woo" | "etsy" | "generic"
+  status         String   @default("disabled")
+  settingsJson   Json?
+  oauthTokens    Json?
+  webhookSecret  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, provider])
+}
+
+model IntegrationMapping {
+  id          String   @id @default(cuid())
+  tenantId    String
+  provider    String
+  kind        String   // "product" | "variant" | "customer" | "order" | "shipment"
+  externalId  String
+  internalId  String
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, kind, externalId])
+  @@index([tenantId, provider, kind])
+}
+
+model IntegrationEvent {
+  id               String   @id @default(cuid())
+  tenantId         String
+  provider         String
+  externalEventId  String?
+  type             String
+  payload          Json
+  status           String   @default("pending")
+  attempts         Int      @default(0)
+  lastError        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, provider, status])
+}
+
+model WebhookEndpoint {
+  id         String   @id @default(cuid())
+  tenantId   String
+  url        String
+  secret     String
+  active     Boolean  @default(true)
+  events     String[] // e.g., ["ORDER.CREATED","ORDER.UPDATED"]
+  createdAt  DateTime @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+}
